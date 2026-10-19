@@ -1,5 +1,5 @@
 {
-  "name": "travel-expense",
+  "name": "tripwallet",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -12,6 +12,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "pg": "^8.23.1"
   }
 }

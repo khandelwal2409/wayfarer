@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { database } from './src/db.js';
+import { database, databaseKind, initializeDatabase } from './src/db.js';
 
 const app = express();
 const scrypt = promisify(crypto.scrypt);
@@ -126,7 +126,7 @@ async function requireAuth(req, res, next) {
   try {
     const token = requestCookie(req);
     if (!token) return fail(res, 401, 'Sign in to continue.');
-    const session = database.prepare(`SELECT users.id, users.username
+    const session = await database.prepare(`SELECT users.id, users.username
       FROM sessions JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`).get(hashToken(token), Date.now());
     if (!session) return fail(res, 401, 'Sign in to continue.');
@@ -138,12 +138,14 @@ async function requireAuth(req, res, next) {
 }
 async function createSession(userId, res) {
   const token = crypto.randomBytes(32).toString('base64url');
-  database.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+  await database.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
     .run(hashToken(token), userId, Date.now() + sessionDuration);
   setSessionCookie(res, token);
 }
-function ownsTrip(userId, tripId) {
-  return Number.isSafeInteger(tripId) && database.prepare('SELECT id FROM trips WHERE id = ? AND user_id = ?').get(tripId, userId);
+async function ownsTrip(userId, tripId) {
+  return Number.isSafeInteger(tripId)
+    ? database.prepare('SELECT id FROM trips WHERE id = ? AND user_id = ?').get(tripId, userId)
+    : null;
 }
 function tripData(body) {
   const { name, destinationCity, destinationState, startDate, endDate, transportMode, notes = '' } = body ?? {};
@@ -216,11 +218,12 @@ app.post('/api/auth/register', authLimiter, async (req, res, next) => {
     const normalized = username.toLowerCase();
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = await scrypt(password, salt, 64);
-    const result = database.prepare('INSERT INTO users (username, password_hash, password_salt) VALUES (?, ?, ?)').run(normalized, passwordHash.toString('hex'), salt);
+    const result = await database.prepare('INSERT INTO users (username, password_hash, password_salt) VALUES (?, ?, ?) RETURNING id')
+      .run(normalized, passwordHash.toString('hex'), salt);
     await createSession(Number(result.lastInsertRowid), res);
     res.status(201).json({ user: { id: Number(result.lastInsertRowid), username: normalized } });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return fail(res, 409, 'That username is already taken.');
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') return fail(res, 409, 'That username is already taken.');
     next(error);
   }
 });
@@ -230,7 +233,7 @@ app.post('/api/auth/login', authLimiter, async (req, res, next) => {
     const username = typeof req.body?.username === 'string' ? req.body.username.toLowerCase() : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     const user = usernamePattern.test(username)
-      ? database.prepare('SELECT id, username, password_hash, password_salt FROM users WHERE username = ?').get(username)
+      ? await database.prepare('SELECT id, username, password_hash, password_salt FROM users WHERE username = ?').get(username)
       : null;
     const actual = await scrypt(password.slice(0, 128), user?.password_salt || dummySalt, 64);
     const expected = Buffer.from(user?.password_hash || dummyHash.toString('hex'), 'hex');
@@ -244,13 +247,13 @@ app.post('/api/auth/login', authLimiter, async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-  database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(requestCookie(req)));
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  await database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(requestCookie(req)));
   clearSessionCookie(res);
   res.json({ ok: true });
 });
 
-function tripSummaries(userId, startDate, endDate) {
+async function tripSummaries(userId, startDate, endDate) {
   const dateFilter = startDate ? 'AND trips.start_date >= ? AND trips.start_date < ?' : '';
   const parameters = startDate ? [userId, startDate, endDate] : [userId];
   return database.prepare(`SELECT trips.*,
@@ -270,16 +273,16 @@ function tripSummaries(userId, startDate, endDate) {
       ORDER BY trips.start_date ASC, trips.id ASC`).all(...parameters);
 }
 
-app.get('/api/trips', requireAuth, (req, res) => {
-  res.json({ trips: tripSummaries(req.user.id) });
+app.get('/api/trips', requireAuth, async (req, res) => {
+  res.json({ trips: await tripSummaries(req.user.id) });
 });
 
-app.get('/api/reports/annual', requireAuth, (req, res) => {
+app.get('/api/reports/annual', requireAuth, async (req, res) => {
   const year = req.query.year;
   if (typeof year !== 'string' || !/^\d{4}$/.test(year) || Number(year) < 1900) {
     return fail(res, 400, 'Choose a valid report year.');
   }
-  const trips = tripSummaries(req.user.id, `${year}-01-01`, `${String(Number(year) + 1).padStart(4, '0')}-01-01`);
+  const trips = await tripSummaries(req.user.id, `${year}-01-01`, `${String(Number(year) + 1).padStart(4, '0')}-01-01`);
   const totals = trips.reduce((result, trip) => {
     result.hotel_paise += trip.hotel_total_paise;
     result.food_paise += trip.food_total_paise;
@@ -292,154 +295,157 @@ app.get('/api/reports/annual', requireAuth, (req, res) => {
   res.json({ year: Number(year), totals, trips });
 });
 
-app.post('/api/trips', requireAuth, (req, res) => {
+app.post('/api/trips', requireAuth, async (req, res) => {
   if (req.body?.travelType === 'international') return fail(res, 409, 'International travel is coming in a future release.');
   if (req.body?.travelType !== 'domestic') return fail(res, 400, 'Choose domestic travel to create a trip.');
   const trip = tripData(req.body);
   if (!trip) return fail(res, 400, 'Please check the trip name, dates, destination, and transport mode.');
-  const result = database.prepare(`INSERT INTO trips
+  const result = await database.prepare(`INSERT INTO trips
     (user_id, travel_type, name, destination_city, destination_state, start_date, end_date, transport_mode, notes)
-    VALUES (?, 'domestic', ?, ?, ?, ?, ?, ?, ?)`).run(req.user.id, trip.name, trip.destinationCity, trip.destinationState, trip.startDate, trip.endDate, trip.transportMode, trip.notes);
+    VALUES (?, 'domestic', ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+    .run(req.user.id, trip.name, trip.destinationCity, trip.destinationState, trip.startDate, trip.endDate, trip.transportMode, trip.notes);
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
 
-app.get('/api/trips/:tripId', requireAuth, (req, res) => {
-  const trip = ownsTrip(req.user.id, Number(req.params.tripId));
+app.get('/api/trips/:tripId', requireAuth, async (req, res) => {
+  const trip = await ownsTrip(req.user.id, Number(req.params.tripId));
   if (!trip) return fail(res, 404, 'Trip not found.');
-  const tripDetails = database.prepare('SELECT * FROM trips WHERE id = ?').get(Number(req.params.tripId));
-  const stays = database.prepare('SELECT * FROM stays WHERE trip_id = ? ORDER BY check_in, id').all(trip.id);
-  const expenses = database.prepare('SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date DESC, id DESC').all(trip.id);
-  const transports = database.prepare('SELECT * FROM transport_records WHERE trip_id = ? ORDER BY transport_date DESC, id DESC')
-    .all(trip.id).map((item) => ({ ...item, details: JSON.parse(item.details_json) }));
-  res.json({ trip: tripDetails, stays, expenses, transports });
+  const tripDetails = await database.prepare('SELECT * FROM trips WHERE id = ?').get(Number(req.params.tripId));
+  const stays = await database.prepare('SELECT * FROM stays WHERE trip_id = ? ORDER BY check_in, id').all(trip.id);
+  const expenses = await database.prepare('SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date DESC, id DESC').all(trip.id);
+  const transports = await database.prepare('SELECT * FROM transport_records WHERE trip_id = ? ORDER BY transport_date DESC, id DESC')
+    .all(trip.id);
+  const transportItems = transports.map((item) => ({ ...item, details: JSON.parse(item.details_json) }));
+  res.json({ trip: tripDetails, stays, expenses, transports: transportItems });
 });
 
-app.put('/api/trips/:tripId', requireAuth, (req, res) => {
+app.put('/api/trips/:tripId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const existing = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const existing = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!existing) return fail(res, 404, 'Trip not found.');
   const trip = tripData(req.body);
   if (!trip) return fail(res, 400, 'Please check the trip name, dates, destination, and transport mode.');
-  const outsideStay = database.prepare('SELECT 1 FROM stays WHERE trip_id = ? AND (check_in < ? OR check_out > ?) LIMIT 1').get(tripId, trip.startDate, trip.endDate);
-  const outsideExpense = database.prepare('SELECT 1 FROM expenses WHERE trip_id = ? AND (expense_date < ? OR expense_date > ?) LIMIT 1').get(tripId, trip.startDate, trip.endDate);
-  const outsideTransport = database.prepare('SELECT 1 FROM transport_records WHERE trip_id = ? AND (transport_date < ? OR transport_date > ?) LIMIT 1')
+  const outsideStay = await database.prepare('SELECT 1 FROM stays WHERE trip_id = ? AND (check_in < ? OR check_out > ?) LIMIT 1').get(tripId, trip.startDate, trip.endDate);
+  const outsideExpense = await database.prepare('SELECT 1 FROM expenses WHERE trip_id = ? AND (expense_date < ? OR expense_date > ?) LIMIT 1').get(tripId, trip.startDate, trip.endDate);
+  const outsideTransport = await database.prepare('SELECT 1 FROM transport_records WHERE trip_id = ? AND (transport_date < ? OR transport_date > ?) LIMIT 1')
     .get(tripId, trip.startDate, trip.endDate);
   if (outsideStay || outsideExpense || outsideTransport) return fail(res, 409, 'The new travel dates must include all existing hotel stays, transport records, and expenses. Update or remove entries first.');
-  database.prepare(`UPDATE trips SET name = ?, destination_city = ?, destination_state = ?, start_date = ?,
+  await database.prepare(`UPDATE trips SET name = ?, destination_city = ?, destination_state = ?, start_date = ?,
     end_date = ?, transport_mode = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .run(trip.name, trip.destinationCity, trip.destinationState, trip.startDate, trip.endDate, trip.transportMode, trip.notes, tripId);
   res.json({ ok: true });
 });
 
-app.delete('/api/trips/:tripId', requireAuth, (req, res) => {
-  const result = database.prepare('DELETE FROM trips WHERE id = ? AND user_id = ?').run(Number(req.params.tripId), req.user.id);
+app.delete('/api/trips/:tripId', requireAuth, async (req, res) => {
+  const result = await database.prepare('DELETE FROM trips WHERE id = ? AND user_id = ?').run(Number(req.params.tripId), req.user.id);
   if (!result.changes) return fail(res, 404, 'Trip not found.');
   res.json({ ok: true });
 });
 
-app.post('/api/trips/:tripId/stays', requireAuth, (req, res) => {
-  const trip = ownsTrip(req.user.id, Number(req.params.tripId)) && database.prepare('SELECT * FROM trips WHERE id = ?').get(Number(req.params.tripId));
+app.post('/api/trips/:tripId/stays', requireAuth, async (req, res) => {
+  const trip = await ownsTrip(req.user.id, Number(req.params.tripId)) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(Number(req.params.tripId));
   if (!trip) return fail(res, 404, 'Trip not found.');
   const stay = stayData(req.body, trip);
   if (!stay) return fail(res, 400, 'Please check the hotel details and dates; the stay must fall within this trip.');
-  const result = database.prepare(`INSERT INTO stays
+  const result = await database.prepare(`INSERT INTO stays
     (trip_id, hotel_name, address, phone, booking_reference, check_in, check_out, hotel_amount_paise, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).run(
     trip.id, stay.hotelName, stay.address, stay.phone, stay.bookingReference, stay.checkIn, stay.checkOut, stay.hotelAmountPaise, stay.notes,
   );
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
 
-app.put('/api/trips/:tripId/stays/:stayId', requireAuth, (req, res) => {
+app.put('/api/trips/:tripId/stays/:stayId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const trip = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const trip = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!trip) return fail(res, 404, 'Trip not found.');
   const stayId = Number(req.params.stayId);
-  const existing = database.prepare('SELECT id FROM stays WHERE id = ? AND trip_id = ?').get(stayId, tripId);
+  const existing = await database.prepare('SELECT id FROM stays WHERE id = ? AND trip_id = ?').get(stayId, tripId);
   if (!existing) return fail(res, 404, 'Hotel stay not found.');
   const stay = stayData(req.body, trip);
   if (!stay) return fail(res, 400, 'Please check the hotel details and dates; the stay must fall within this trip.');
-  database.prepare(`UPDATE stays SET hotel_name = ?, address = ?, phone = ?, booking_reference = ?,
+  await database.prepare(`UPDATE stays SET hotel_name = ?, address = ?, phone = ?, booking_reference = ?,
     check_in = ?, check_out = ?, hotel_amount_paise = ?, notes = ? WHERE id = ? AND trip_id = ?`)
     .run(stay.hotelName, stay.address, stay.phone, stay.bookingReference, stay.checkIn, stay.checkOut, stay.hotelAmountPaise, stay.notes, stayId, tripId);
   res.json({ ok: true });
 });
 
-app.delete('/api/trips/:tripId/stays/:stayId', requireAuth, (req, res) => {
+app.delete('/api/trips/:tripId/stays/:stayId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  if (!ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
-  const result = database.prepare('DELETE FROM stays WHERE id = ? AND trip_id = ?').run(Number(req.params.stayId), tripId);
+  if (!await ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
+  const result = await database.prepare('DELETE FROM stays WHERE id = ? AND trip_id = ?').run(Number(req.params.stayId), tripId);
   if (!result.changes) return fail(res, 404, 'Hotel stay not found.');
   res.json({ ok: true });
 });
 
-app.post('/api/trips/:tripId/expenses', requireAuth, (req, res) => {
+app.post('/api/trips/:tripId/expenses', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const trip = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const trip = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!trip) return fail(res, 404, 'Trip not found.');
   const expense = expenseData(req.body, trip);
   if (!expense) return fail(res, 400, 'Please check the expense amount, category, and travel date.');
-  const result = database.prepare(`INSERT INTO expenses
+  const result = await database.prepare(`INSERT INTO expenses
     (trip_id, expense_date, category, description, amount_paise, payment_method, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(tripId, expense.expenseDate, expense.category, expense.description, expense.amountPaise, expense.paymentMethod, expense.notes);
+    VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+    .run(tripId, expense.expenseDate, expense.category, expense.description, expense.amountPaise, expense.paymentMethod, expense.notes);
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
 
-app.put('/api/trips/:tripId/expenses/:expenseId', requireAuth, (req, res) => {
+app.put('/api/trips/:tripId/expenses/:expenseId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const trip = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const trip = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!trip) return fail(res, 404, 'Trip not found.');
   const expenseId = Number(req.params.expenseId);
-  if (!database.prepare('SELECT id FROM expenses WHERE id = ? AND trip_id = ?').get(expenseId, tripId)) return fail(res, 404, 'Expense not found.');
+  if (!await database.prepare('SELECT id FROM expenses WHERE id = ? AND trip_id = ?').get(expenseId, tripId)) return fail(res, 404, 'Expense not found.');
   const expense = expenseData(req.body, trip);
   if (!expense) return fail(res, 400, 'Please check the expense amount, category, and travel date.');
-  database.prepare(`UPDATE expenses SET expense_date = ?, category = ?, description = ?, amount_paise = ?,
+  await database.prepare(`UPDATE expenses SET expense_date = ?, category = ?, description = ?, amount_paise = ?,
     payment_method = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND trip_id = ?`)
     .run(expense.expenseDate, expense.category, expense.description, expense.amountPaise, expense.paymentMethod, expense.notes, expenseId, tripId);
   res.json({ ok: true });
 });
 
-app.delete('/api/trips/:tripId/expenses/:expenseId', requireAuth, (req, res) => {
+app.delete('/api/trips/:tripId/expenses/:expenseId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  if (!ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
-  const result = database.prepare('DELETE FROM expenses WHERE id = ? AND trip_id = ?').run(Number(req.params.expenseId), tripId);
+  if (!await ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
+  const result = await database.prepare('DELETE FROM expenses WHERE id = ? AND trip_id = ?').run(Number(req.params.expenseId), tripId);
   if (!result.changes) return fail(res, 404, 'Expense not found.');
   res.json({ ok: true });
 });
 
-app.post('/api/trips/:tripId/transports', requireAuth, (req, res) => {
+app.post('/api/trips/:tripId/transports', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const trip = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const trip = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!trip) return fail(res, 404, 'Trip not found.');
   const transport = transportData(req.body, trip);
   if (!transport) return fail(res, 400, 'Please check the transport mode, required travel details, amount, and date.');
-  const result = database.prepare(`INSERT INTO transport_records (trip_id, transport_date, mode, amount_paise, details_json)
-    VALUES (?, ?, ?, ?, ?)`).run(
+  const result = await database.prepare(`INSERT INTO transport_records (trip_id, transport_date, mode, amount_paise, details_json)
+    VALUES (?, ?, ?, ?, ?) RETURNING id`).run(
     tripId, transport.transportDate, transport.mode, transport.amountPaise, JSON.stringify(transport.details),
   );
   res.status(201).json({ id: Number(result.lastInsertRowid) });
 });
 
-app.put('/api/trips/:tripId/transports/:transportId', requireAuth, (req, res) => {
+app.put('/api/trips/:tripId/transports/:transportId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  const trip = ownsTrip(req.user.id, tripId) && database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const trip = await ownsTrip(req.user.id, tripId) && await database.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
   if (!trip) return fail(res, 404, 'Trip not found.');
   const transportId = Number(req.params.transportId);
-  if (!database.prepare('SELECT id FROM transport_records WHERE id = ? AND trip_id = ?').get(transportId, tripId)) {
+  if (!await database.prepare('SELECT id FROM transport_records WHERE id = ? AND trip_id = ?').get(transportId, tripId)) {
     return fail(res, 404, 'Transport record not found.');
   }
   const transport = transportData(req.body, trip);
   if (!transport) return fail(res, 400, 'Please check the transport mode, required travel details, amount, and date.');
-  database.prepare(`UPDATE transport_records SET transport_date = ?, mode = ?, amount_paise = ?, details_json = ?,
+  await database.prepare(`UPDATE transport_records SET transport_date = ?, mode = ?, amount_paise = ?, details_json = ?,
     updated_at = CURRENT_TIMESTAMP WHERE id = ? AND trip_id = ?`)
     .run(transport.transportDate, transport.mode, transport.amountPaise, JSON.stringify(transport.details), transportId, tripId);
   res.json({ ok: true });
 });
 
-app.delete('/api/trips/:tripId/transports/:transportId', requireAuth, (req, res) => {
+app.delete('/api/trips/:tripId/transports/:transportId', requireAuth, async (req, res) => {
   const tripId = Number(req.params.tripId);
-  if (!ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
-  const result = database.prepare('DELETE FROM transport_records WHERE id = ? AND trip_id = ?')
+  if (!await ownsTrip(req.user.id, tripId)) return fail(res, 404, 'Trip not found.');
+  const result = await database.prepare('DELETE FROM transport_records WHERE id = ? AND trip_id = ?')
     .run(Number(req.params.transportId), tripId);
   if (!result.changes) return fail(res, 404, 'Transport record not found.');
   res.json({ ok: true });
@@ -454,8 +460,10 @@ app.use((error, req, res, next) => {
   return fail(res, 500, 'Something went wrong. Please try again.');
 });
 
+await initializeDatabase();
 const cleanup = setInterval(() => {
-  database.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
+  database.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now())
+    .catch((error) => console.error('Unable to clean up expired sessions:', error));
 }, 60 * 60 * 1000);
 cleanup.unref();
-app.listen(port, () => console.log(`Travel Expense listening on port ${port}`));
+app.listen(port, () => console.log(`Travel Expense listening on port ${port} with ${databaseKind}.`));

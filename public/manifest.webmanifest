@@ -1,6 +1,6 @@
 {
-  "name": "Tripzy Travel Expense",
-  "short_name": "Tripzy",
+  "name": "Tripwallet Travel Expense",
+  "short_name": "Tripwallet",
   "description": "Keep travel dates, hotel details, and trip expenses together in INR.",
   "start_url": "/",
   "display": "standalone",

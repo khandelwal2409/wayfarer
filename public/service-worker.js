@@ -1,4 +1,4 @@
-const CACHE = 'tripzy-shell-v1';
+const CACHE = 'tripwallet-shell-v2';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -8,7 +8,9 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(
-    keys.filter((key) => (key.startsWith('wayfarer-shell-') || key.startsWith('tripzy-shell-')) && key !== CACHE)
+    keys.filter((key) => (key.startsWith('wayfarer-shell-')
+      || key.startsWith('tripzy-shell-')
+      || key.startsWith('tripwallet-shell-')) && key !== CACHE)
       .map((key) => caches.delete(key)),
   )));
   self.clients.claim();

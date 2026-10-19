@@ -53,7 +53,14 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   child = spawn(process.execPath, [join(process.cwd(), 'server.js')], {
     cwd: directory,
-    env: { ...process.env, PORT: String(port), DB_PATH: join(directory, 'test.sqlite'), ALLOW_REGISTRATION: 'true', NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: join(directory, 'test.sqlite'),
+      DATABASE_URL: '',
+      ALLOW_REGISTRATION: 'true',
+      NODE_ENV: 'test',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (chunk) => { output += chunk.toString(); });
@@ -72,14 +79,14 @@ after(async () => {
 test('users can create trips, manage stays and expenses, and cannot read each other’s records', async () => {
   const page = await fetch(`${baseUrl}/`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Tripzy/);
+  assert.match(await page.text(), /Tripwallet/);
   const manifest = await fetch(`${baseUrl}/manifest.webmanifest`);
   assert.equal(manifest.status, 200);
-  assert.match(await manifest.text(), /Tripzy Travel Expense/);
+  assert.match(await manifest.text(), /Tripwallet Travel Expense/);
   const appScript = await fetch(`${baseUrl}/app.js`);
   assert.equal(appScript.status, 200);
   const appScriptText = await appScript.text();
-  assert.match(appScriptText, /Tripzy/);
+  assert.match(appScriptText, /Tripwallet/);
   assert.match(appScriptText, /currency: 'INR'/);
   assert.match(appScriptText, /Select a state or union territory/);
   assert.match(appScriptText, /In progress/);
