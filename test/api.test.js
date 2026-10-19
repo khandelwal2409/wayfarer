@@ -72,10 +72,15 @@ after(async () => {
 test('users can create trips, manage stays and expenses, and cannot read each other’s records', async () => {
   const page = await fetch(`${baseUrl}/`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Wayfarer/);
+  assert.match(await page.text(), /Tripzy/);
+  const manifest = await fetch(`${baseUrl}/manifest.webmanifest`);
+  assert.equal(manifest.status, 200);
+  assert.match(await manifest.text(), /Tripzy Travel Expense/);
   const appScript = await fetch(`${baseUrl}/app.js`);
   assert.equal(appScript.status, 200);
   const appScriptText = await appScript.text();
+  assert.match(appScriptText, /Tripzy/);
+  assert.match(appScriptText, /currency: 'INR'/);
   assert.match(appScriptText, /Select a state or union territory/);
   assert.match(appScriptText, /In progress/);
   assert.match(appScriptText, /Upcoming/);

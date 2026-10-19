@@ -89,10 +89,10 @@ function notify(message) {
   toastTimeout = setTimeout(() => toast.classList.remove('show'), 2800);
 }
 
-function shell(content, { title = 'Wayfarer', back = false } = {}) {
+function shell(content, { title = 'Tripzy', back = false } = {}) {
   app.innerHTML = `<div class="shell">
     <header class="topbar">
-      <div class="brand-lockup"><span class="mark">W</span><span>${esc(title)}</span></div>
+      <div class="brand-lockup"><img class="brand-icon" src="/icon.svg" alt=""><span>${esc(title)}</span></div>
       <div class="top-actions">
         ${state.user ? `<span class="user-tag">${esc(state.user.username)}</span><button class="button secondary small" data-action="logout">Sign out</button>` : ''}
         ${back ? '<button class="button secondary small" data-action="back">All trips</button>' : ''}
@@ -105,7 +105,7 @@ function shell(content, { title = 'Wayfarer', back = false } = {}) {
 function renderAuth() {
   app.innerHTML = `<div class="auth-page">
     <section class="auth-hero">
-      <div class="brand"><span class="mark">W</span><h1>Wayfarer</h1></div>
+      <div class="brand"><img class="brand-icon" src="/icon.svg" alt=""><h1>Tripzy</h1></div>
       <div><p class="eyebrow hero-eyebrow">Travel, accounted for</p><h2>Keep the trip. Not the receipts pile.</h2><p>One simple place for your itinerary, hotel stays, and everyday travel expenses.</p></div>
       <p class="hero-foot">A pocket-sized domestic travel ledger</p>
     </section>

@@ -1,6 +1,6 @@
-# Wayfarer
+# Tripzy
 
-Wayfarer is a responsive travel-expense app for keeping trip dates, transport details, hotel information, and day-to-day expenses together. The first release supports domestic travel in India; international travel has a separate entry point but is not enabled for expense recording yet.
+Tripzy is a responsive travel-expense app for keeping trip dates, transport details, hotel information, and day-to-day expenses together. The first release supports domestic travel in India; international travel has a separate entry point but is not enabled for expense recording yet. All travel expense amounts are displayed in Indian rupees (₹).
 
 ## Features
 
