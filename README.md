@@ -7,6 +7,7 @@ Wayfarer is a responsive travel-expense app for keeping trip dates, transport de
 - Create an account, sign in, and keep each traveller's records private.
 - Choose domestic or international travel after signing in.
 - Create and update domestic trips with destination, dates, transport mode, and notes.
+- Browse domestic trips in chronological departure-date order.
 - Select an Indian state or union territory from the trip form and see whether trips are upcoming, in progress, or completed.
 - View trip dates highlighted on a navigable calendar.
 - Save, update, and delete hotel stays, booking details, and the amount paid.

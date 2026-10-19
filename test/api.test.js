@@ -234,6 +234,15 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
   const deletedTransport = await request(`/api/trips/${tripId}/transports/${transport.data.id}`, { cookie, method: 'DELETE' });
   assert.equal(deletedTransport.response.status, 200);
   assert.equal((await request('/api/trips', { cookie })).data.trips[0].total_paise, 640050);
+  const earlierTrip = await request('/api/trips', { cookie, method: 'POST', body: {
+    ...tripBody,
+    name: 'Earlier trip',
+    startDate: '2026-10-01',
+    endDate: '2026-10-02',
+  } });
+  assert.equal(earlierTrip.response.status, 201);
+  const orderedTrips = await request('/api/trips', { cookie });
+  assert.deepEqual(orderedTrips.data.trips.map((trip) => trip.start_date), ['2026-10-01', '2026-11-02']);
 
   assert.equal((await request('/api/trips', { method: 'POST', body: tripBody })).response.status, 401);
 });

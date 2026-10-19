@@ -267,7 +267,7 @@ function tripSummaries(userId, startDate, endDate) {
       + COALESCE((SELECT SUM(transport_records.amount_paise) FROM transport_records WHERE transport_records.trip_id = trips.id), 0) AS total_paise
     FROM trips
     WHERE trips.user_id = ? ${dateFilter}
-    ORDER BY trips.start_date DESC, trips.id DESC`).all(...parameters);
+      ORDER BY trips.start_date ASC, trips.id ASC`).all(...parameters);
 }
 
 app.get('/api/trips', requireAuth, (req, res) => {
