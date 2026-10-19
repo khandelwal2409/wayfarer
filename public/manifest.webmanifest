@@ -1,0 +1,12 @@
+{
+  "name": "Wayfarer Travel Expense",
+  "short_name": "Wayfarer",
+  "description": "Keep travel dates, hotel details, and trip expenses together.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5ef",
+  "theme_color": "#143a31",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
