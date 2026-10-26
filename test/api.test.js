@@ -173,6 +173,34 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
     details: { operator: 'Air India', startLocation: 'Jaipur' },
   } });
   assert.equal(invalidTransport.response.status, 400);
+  const flight = await request(`/api/trips/${tripId}/transports`, { cookie, method: 'POST', body: {
+    transportDate: '2026-11-05', mode: 'flight', amount: 2200,
+    details: {
+      operator: 'Air India', serviceNumber: 'AI101', startLocation: 'Jaipur',
+      endLocation: 'Delhi', departureTime: '09:35', arrivalTime: '11:10',
+    },
+  } });
+  assert.equal(flight.response.status, 201);
+  const invalidFlightTime = await request(`/api/trips/${tripId}/transports`, { cookie, method: 'POST', body: {
+    transportDate: '2026-11-05', mode: 'flight', amount: 2200,
+    details: {
+      operator: 'Air India', startLocation: 'Jaipur', endLocation: 'Delhi',
+      departureTime: '25:90',
+    },
+  } });
+  assert.equal(invalidFlightTime.response.status, 400);
+  const updatedFlight = await request(`/api/trips/${tripId}/transports/${flight.data.id}`, { cookie, method: 'PUT', body: {
+    transportDate: '2026-11-05', mode: 'flight', amount: 2200,
+    details: {
+      operator: 'Air India', serviceNumber: 'AI101', startLocation: 'Jaipur',
+      endLocation: 'Delhi', departureTime: '10:00', arrivalTime: '11:35',
+    },
+  } });
+  assert.equal(updatedFlight.response.status, 200);
+  const flightDetails = await request(`/api/trips/${tripId}`, { cookie });
+  const savedFlight = flightDetails.data.transports.find((item) => item.id === flight.data.id);
+  assert.equal(savedFlight.details.departureTime, '10:00');
+  assert.equal(savedFlight.details.arrivalTime, '11:35');
   const carTransport = await request(`/api/trips/${tripId}/transports`, { cookie, method: 'POST', body: {
     mode: 'car', amount: 750, transportDate: '', details: { vehicleNumber: 'ignored', startLocation: 'ignored' },
   } });
@@ -194,18 +222,18 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
   assert.equal(detail.data.stays[0].hotel_name, 'City Hotel Jaipur');
   assert.equal(detail.data.stays[0].hotel_amount_paise, 610050);
   assert.equal(detail.data.expenses[0].amount_paise, 25050);
-  assert.equal(detail.data.transports[0].details.serviceNumber, '12015');
+  assert.equal(detail.data.transports.find((item) => item.id === transport.data.id).details.serviceNumber, '12015');
   let tripList = await request('/api/trips', { cookie });
-  assert.equal(tripList.data.trips[0].total_paise, 815100);
+  assert.equal(tripList.data.trips[0].total_paise, 1035100);
   assert.equal(tripList.data.trips[0].hotel_total_paise, 610050);
   assert.equal(tripList.data.trips[0].food_total_paise, 25050);
-  assert.equal(tripList.data.trips[0].transport_total_paise, 180000);
+  assert.equal(tripList.data.trips[0].transport_total_paise, 400000);
   const annualReport = await request('/api/reports/annual?year=2026', { cookie });
   assert.equal(annualReport.response.status, 200);
-  assert.equal(annualReport.data.totals.total_paise, 815100);
+  assert.equal(annualReport.data.totals.total_paise, 1035100);
   assert.equal(annualReport.data.totals.hotel_paise, 610050);
   assert.equal(annualReport.data.totals.food_paise, 25050);
-  assert.equal(annualReport.data.totals.transport_paise, 180000);
+  assert.equal(annualReport.data.totals.transport_paise, 400000);
   assert.equal(annualReport.data.trips.length, 1);
   assert.equal((await request('/api/reports/annual?year=2026', { cookie: otherCookie })).data.trips.length, 0);
   assert.equal((await request('/api/reports/annual?year=invalid', { cookie })).response.status, 400);
@@ -223,17 +251,18 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
     },
   } });
   assert.equal(updatedTransport.response.status, 200);
-  assert.equal((await request(`/api/trips/${tripId}`, { cookie })).data.transports[0].amount_paise, 200000);
-  assert.equal((await request('/api/trips', { cookie })).data.trips[0].total_paise, 835100);
+  const updatedTransportDetails = await request(`/api/trips/${tripId}`, { cookie });
+  assert.equal(updatedTransportDetails.data.transports.find((item) => item.id === transport.data.id).amount_paise, 200000);
+  assert.equal((await request('/api/trips', { cookie })).data.trips[0].total_paise, 1055100);
 
   const updated = await request(`/api/trips/${tripId}/expenses/${expense.data.id}`, {
     cookie, method: 'PUT', body: { expenseDate: '2026-11-03', category: 'food', description: 'Lunch with client', amount: 300 },
   });
   assert.equal(updated.response.status, 200);
   tripList = await request('/api/trips', { cookie });
-  assert.equal(tripList.data.trips[0].total_paise, 840050);
+  assert.equal(tripList.data.trips[0].total_paise, 1060050);
   const updatedAnnualReport = await request('/api/reports/annual?year=2026', { cookie });
-  assert.equal(updatedAnnualReport.data.totals.total_paise, 840050);
+  assert.equal(updatedAnnualReport.data.totals.total_paise, 1060050);
   const updatedTrip = await request(`/api/trips/${tripId}`, {
     cookie, method: 'PUT', body: { ...tripBody, name: 'Updated work trip', endDate: '2026-11-07' },
   });
@@ -245,7 +274,7 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
   assert.equal(invalidTripDateChange.response.status, 409);
   const deletedTransport = await request(`/api/trips/${tripId}/transports/${transport.data.id}`, { cookie, method: 'DELETE' });
   assert.equal(deletedTransport.response.status, 200);
-  assert.equal((await request('/api/trips', { cookie })).data.trips[0].total_paise, 640050);
+  assert.equal((await request('/api/trips', { cookie })).data.trips[0].total_paise, 860050);
   const earlierTrip = await request('/api/trips', { cookie, method: 'POST', body: {
     ...tripBody,
     name: 'Earlier trip',
@@ -264,7 +293,8 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
   } });
   assert.equal(earlierExpense.response.status, 201);
   const annualSummary = await request('/api/reports/annual?year=2026', { cookie });
-  assert.equal(annualSummary.data.totals.total_paise, 660050);
+  assert.equal(annualSummary.data.totals.total_paise, 880050);
+  assert.equal(annualSummary.data.totals.transport_paise, 220000);
   assert.equal(annualSummary.data.totals.hotel_paise, 620075);
   assert.equal(annualSummary.data.totals.food_paise, 39975);
   assert.equal(annualSummary.data.trips.length, 2);

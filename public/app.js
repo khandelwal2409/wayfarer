@@ -13,7 +13,8 @@ const transportFieldDefinitions = {
   ],
   flight: [
     ['operator', 'Airline', true], ['serviceNumber', 'Flight number'], ['startLocation', 'Departure airport', true],
-    ['endLocation', 'Arrival airport', true], ['bookingReference', 'PNR / booking reference'],
+    ['endLocation', 'Arrival airport', true], ['departureTime', 'Departure time', false, false, 'time'],
+    ['arrivalTime', 'Arrival time', false, false, 'time'], ['bookingReference', 'PNR / booking reference'],
   ],
   train: [
     ['operator', 'Train name', true], ['serviceNumber', 'Train number'], ['startLocation', 'From station', true],
@@ -194,9 +195,9 @@ function tripBreakdown(trip) {
 }
 
 function transportFieldsMarkup(mode, details = {}) {
-  return transportFieldDefinitions[mode].map(([name, label, required = false, numeric = false]) => `
+  return transportFieldDefinitions[mode].map(([name, label, required = false, numeric = false, type = 'text']) => `
     <label class="field"><span>${label}${required ? '' : ' <small class="muted">(optional)</small>'}</span>
-      <input name="detail-${name}" ${numeric ? 'type="number" min="0.1" max="1000000" step="0.1"' : 'type="text" maxlength="120"'}
+      <input name="detail-${name}" ${numeric ? 'type="number" min="0.1" max="1000000" step="0.1"' : `type="${type}" maxlength="120"`}
         ${required ? 'required' : ''} value="${esc(details[name] ?? '')}"${numeric ? ' placeholder="0"' : ''}>
     </label>`).join('');
 }

@@ -30,6 +30,8 @@ const transportFields = {
     { name: 'serviceNumber', label: 'Flight number', max: 30 },
     { name: 'startLocation', label: 'Departure airport', max: 120, required: true },
     { name: 'endLocation', label: 'Arrival airport', max: 120, required: true },
+    { name: 'departureTime', label: 'Departure time', max: 5, type: 'time' },
+    { name: 'arrivalTime', label: 'Arrival time', max: 5, type: 'time' },
     { name: 'bookingReference', label: 'PNR / booking reference', max: 40 },
   ],
   train: [
@@ -188,7 +190,11 @@ function transportData(body, trip) {
   const cleanDetails = {};
   for (const field of transportFields[mode]) {
     const value = details[field.name];
-    if (field.numeric) {
+    if (field.type === 'time') {
+      if (value === undefined || value === '') continue;
+      if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+      cleanDetails[field.name] = value;
+    } else if (field.numeric) {
       if (value === '' || value === undefined || value === null) {
         if (field.required) return null;
         continue;
