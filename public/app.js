@@ -414,7 +414,7 @@ function renderTrip() {
         <div class="saved-records">${expenses}</div>
         <details class="form-disclosure spaced-top-small" ${state.editingExpense ? 'open' : ''}>
           <summary>${state.editingExpense ? 'Edit expense' : 'Add expense'}</summary>
-          ${expenseForm(trip)}
+          ${expenseForm(state.trip)}
         </details>
       </div>
     </details>
