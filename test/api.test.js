@@ -255,6 +255,20 @@ test('users can create trips, manage stays and expenses, and cannot read each ot
   assert.equal(earlierTrip.response.status, 201);
   const orderedTrips = await request('/api/trips', { cookie });
   assert.deepEqual(orderedTrips.data.trips.map((trip) => trip.start_date), ['2026-10-01', '2026-11-02']);
+  const earlierHotel = await request(`/api/trips/${earlierTrip.data.id}/stays`, { cookie, method: 'POST', body: {
+    hotelName: 'Earlier stay', checkIn: '2026-10-01', checkOut: '2026-10-02', hotelAmount: 100.25,
+  } });
+  assert.equal(earlierHotel.response.status, 201);
+  const earlierExpense = await request(`/api/trips/${earlierTrip.data.id}/expenses`, { cookie, method: 'POST', body: {
+    expenseDate: '2026-10-01', category: 'food', description: 'Breakfast', amount: 99.75,
+  } });
+  assert.equal(earlierExpense.response.status, 201);
+  const annualSummary = await request('/api/reports/annual?year=2026', { cookie });
+  assert.equal(annualSummary.data.totals.total_paise, 660050);
+  assert.equal(annualSummary.data.totals.hotel_paise, 620075);
+  assert.equal(annualSummary.data.totals.food_paise, 39975);
+  assert.equal(annualSummary.data.trips.length, 2);
+  assert.equal(typeof annualSummary.data.totals.total_paise, 'number');
 
   assert.equal((await request('/api/trips', { method: 'POST', body: tripBody })).response.status, 401);
 });

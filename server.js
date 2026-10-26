@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { annualTotals } from './src/annual-report.js';
 import { database, databaseKind, initializeDatabase } from './src/db.js';
 
 const app = express();
@@ -283,16 +284,7 @@ app.get('/api/reports/annual', requireAuth, async (req, res) => {
     return fail(res, 400, 'Choose a valid report year.');
   }
   const trips = await tripSummaries(req.user.id, `${year}-01-01`, `${String(Number(year) + 1).padStart(4, '0')}-01-01`);
-  const totals = trips.reduce((result, trip) => {
-    result.hotel_paise += trip.hotel_total_paise;
-    result.food_paise += trip.food_total_paise;
-    result.fuel_paise += trip.fuel_total_paise;
-    result.transport_paise += trip.transport_total_paise;
-    result.other_paise += trip.other_total_paise;
-    result.total_paise += trip.total_paise;
-    return result;
-  }, { hotel_paise: 0, food_paise: 0, fuel_paise: 0, transport_paise: 0, other_paise: 0, total_paise: 0 });
-  res.json({ year: Number(year), totals, trips });
+  res.json({ year: Number(year), totals: annualTotals(trips), trips });
 });
 
 app.post('/api/trips', requireAuth, async (req, res) => {
